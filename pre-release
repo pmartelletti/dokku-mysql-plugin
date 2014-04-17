@@ -1,6 +1,0 @@
-#!/bin/bash
-
-APP="$1"; IMAGE="app/$APP";
-if [[ -f "$DOKKU_ROOT/.mysql/pwd_$APP" ]]; then
-    dokku mysql:link $APP $APP
-fi
