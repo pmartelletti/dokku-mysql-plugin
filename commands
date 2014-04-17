@@ -17,6 +17,11 @@ if [[ $1 == mysql:* ]]; then
     fi
 fi
 
+if [[ ! -d $DOKKU_ROOT/.mysql ]]; then
+    mkdir -p $DOKKU_ROOT/.mysql
+    chown -R dokku: $DOKKU_ROOT/.mysql
+fi
+
 case "$1" in
 
   mysql:create)
@@ -28,48 +33,46 @@ case "$1" in
         exit 1
     fi
     # Check if an existing DB volume exists
-    if [[ -d "/var/lib/docker/volumes/mysql-$APP" ]]; then
-        VOLUME="/var/lib/docker/volumes/mysql-$APP/layer:/var/lib/mysql"
+    if [[ -f "$DOKKU_ROO/.mysql/volume_$APP" ]]; then
+        VOLUME="`cat $DOKKU_ROOT/.mysql/volume_$APP`:/opt/mysql"
         echo
         echo "-----> Reusing mysql/$APP database"
     else
-        VOLUME="/var/lib/mysql"
+        VOLUME="/opt/mysql"
         # Generate a random password for DB user
         DB_PASS=$(< /dev/urandom tr -dc A-Za-z0-9 | head -c 16)
         # DB_NAME=$(echo "www.atomic24.com" | sed -e 's/\.//g')
         # DB_USER='user'$RANDOM
         # Temporarily store it to a file
-        if [[ ! -d $DOKKU_ROOT/.mysql ]]; then
-            mkdir -p $DOKKU_ROOT/.mysql
-            chown -R dokku: $DOKKU_ROOT/.mysql
-        fi
         echo $DB_PASS > "$DOKKU_ROOT/.mysql/pwd_$APP"
         chown dokku: "$DOKKU_ROOT/.mysql/pwd_$APP"
+        chmod 700 "$DOKKU_ROOT/.mysql/pwd_$APP"
     fi
     # Fork DB image
-    ID=$(docker run -d hughfletcher/mysql exit 0)    
+    ID=$(docker run -d hughfletcher/mysql exit 0)
     docker wait $ID > /dev/null
     IMAGE=$(docker commit $ID)
     docker tag $IMAGE $DB_IMAGE
     # Launch container
-    ID=$(docker run -v $VOLUME -d $DB_IMAGE /usr/sbin/mysqld)
+    ID=$(docker run -v $VOLUME -p 3306 -d $DB_IMAGE /usr/sbin/mysqld)
+    sleep 4
 
-    if [[ ! -d "/var/lib/docker/volumes/mysql-$APP" ]]; then
+    if [[ ! -f "$DOKKU_ROOT/.mysql/volume_$APP" ]]; then
+        VOLUME_PATH=$(docker inspect $ID | grep /var/lib/docker/vfs/dir/ | awk '{print $2}' | sed -e's/"//g')
         IP=$(docker inspect $ID | grep IPAddress | awk '{ print $2 }' | tr -d ',"')
-        sleep 4
         docker run $DB_IMAGE mysqladmin -h $IP -u admin -p'mysql-server' password $DB_PASS
         docker run $DB_IMAGE mysqladmin -h $IP -u admin -p$DB_PASS create 'db'
-        # docker run mysql/create mysql -h $IP -u admin -p'newpass' -e "RENAME USER admin@'%' TO $DB_USER@'%';" 
-        
+        # docker run mysql/create mysql -h $IP -u admin -p'newpass' -e "RENAME USER admin@'%' TO $DB_USER@'%';"
+
         # Rename persistent volume
-        VOLUME_PATH=$(docker inspect $ID | grep "/var/lib/docker/vfs/dir/" | awk '{print $2}' | sed -e's/"//g')
         if [[ -z $VOLUME_PATH ]]; then
             echo "Your docker version is too old, please update it"
             exit 1
         fi
-        mv $VOLUME_PATH "/var/lib/docker/volumes/mysql-$APP"
-        sleep 1
+        echo $VOLUME_PATH > "$DOKKU_ROOT/.mysql/volume_$APP"
     fi
+    PORT=$(docker port $ID 3306 | sed 's/0.0.0.0://')
+    echo $PORT > "$DOKKU_ROOT/.mysql/port_$APP"
     # Link to a potential existing app
     dokku mysql:link $APP $APP
     echo
@@ -80,19 +83,30 @@ case "$1" in
 
   mysql:delete)
     DB_IMAGE=mysql/$APP
-    # Stop the container
+    # Stop and remove the container
     ID=$(docker ps -a | grep "$DB_IMAGE":latest |  awk '{print $1}')
     if [[ ! -z $ID ]]; then
-        docker stop $ID
+        docker kill $ID > /dev/null
+        sleep 1
+        docker rm -v $ID > /dev/null
+        sleep 1
     fi
     # Remove image
     IMAGE=$(docker images | grep "$DB_IMAGE " |  awk '{print $1}')
     if [[ ! -z $IMAGE ]]; then
         docker rmi $IMAGE
     fi
+    # Remove container port storage
+    if [[ -f "$DOKKU_ROOT/.mysql/port_$APP" ]]; then
+        rm -f "$DOKKU_ROOT/.mysql/port_$APP"
+    fi
+    # Remove container root password
+    if [[ -f "$DOKKU_ROOT/.mysql/pwd_$APP" ]]; then
+        rm -f "$DOKKU_ROOT/.mysql/pwd_$APP"
+    fi
     # Remove persistent volume
-    if [[ -d "/var/lib/docker/volumes/mysql-$APP" ]]; then
-        rm -rf "/var/lib/docker/volumes/mysql-$APP"
+    if [[ -f "$DOKKU_ROOT/.mysql/volume_$APP" ]]; then
+        rm -f "$DOKKU_ROOT/.mysql/volume_$APP"
     fi
     echo
     echo "-----> MySql container deleted: $DB_IMAGE"
@@ -125,28 +139,17 @@ case "$1" in
         fi
         DB_IMAGE="mysql/$3"
         # Check temporarily file
-        if [[ ! -f "$DOKKU_ROOT/.mysql/pwd_$APP" ]]; then
-            echo "Database is already linked"
+        if [[ ! -f "$DOKKU_ROOT/.mysql/pwd_$3" ]]; then
+            echo "Database is not initialized correctly"
             exit 1
         fi
         DB_PASSWORD=$(cat "$DOKKU_ROOT/.mysql/pwd_$APP")
         ID=$(docker ps -a | grep "$DB_IMAGE":latest |  awk '{print $1}')
         IP=$(docker inspect $ID | grep IPAddress | awk '{ print $2 }' | tr -d ',"')
-        # Write database connection vars to app's ENV file
-        # I know there has to be a more eloquent method of doing this...
-        HOST="DB_HOST=$IP"
-        cat "$DOKKU_ROOT/$APP/ENV" | grep "$HOST" || echo "export $HOST" >> "$DOKKU_ROOT/$APP/ENV"
-        USER="DB_USER=admin"
-        cat "$DOKKU_ROOT/$APP/ENV" | grep "$USER" || echo "export $USER" >> "$DOKKU_ROOT/$APP/ENV"
-        PASS="DB_PASS=$DB_PASSWORD"
-        cat "$DOKKU_ROOT/$APP/ENV" | grep "$PASS" || echo "export $PASS" >> "$DOKKU_ROOT/$APP/ENV"
-        NAME="DB_NAME=db"
-        cat "$DOKKU_ROOT/$APP/ENV" | grep "$NAME" || echo "export $NAME" >> "$DOKKU_ROOT/$APP/ENV"
-        PORT="DB_PORT=3306"
-        cat "$DOKKU_ROOT/$APP/ENV" | grep "$PORT" || echo "export $PORT" >> "$DOKKU_ROOT/$APP/ENV"
+        PORT=$(cat "$DOKKU_ROOT/.mysql/port_$3")
+        dokku config:set $APP "DATABASE_URL=mysql://admin:$DB_PASSWORD@$IP:$PORT/db"
         echo
         echo "-----> $APP linked to $DB_IMAGE database"
-        rm "$DOKKU_ROOT/.mysql/pwd_$APP"
     fi
     ;;
 
