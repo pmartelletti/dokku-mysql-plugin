@@ -144,7 +144,7 @@ case "$1" in
             exit 1
         fi
         DB_PASSWORD=$(cat "$DOKKU_ROOT/.mysql/pwd_$APP")
-        ID=$(docker ps -a | grep "$DB_IMAGE":latest |  awk '{print $1}')
+        ID=$(docker ps | grep "$DB_IMAGE":latest |  awk '{print $1}')
         IP=$(docker inspect $ID | grep IPAddress | awk '{ print $2 }' | tr -d ',"')
         PORT=$(cat "$DOKKU_ROOT/.mysql/port_$3")
         dokku config:set $APP "DATABASE_URL=mysql://admin:$DB_PASSWORD@$IP:$PORT/db"
