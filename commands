@@ -50,6 +50,9 @@ case "$1" in
     fi
     # Fork DB image
     ID=$(docker run -d hughfletcher/mysql exit 0)
+    if [[ -z "$ID" ]]; then
+        docker stop $ID > /dev/null
+    fi
     docker wait $ID > /dev/null
     IMAGE=$(docker commit $ID)
     docker tag $IMAGE $DB_IMAGE
