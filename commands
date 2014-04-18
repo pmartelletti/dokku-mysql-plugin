@@ -32,6 +32,11 @@ case "$1" in
         echo "MySql image not found... Did you run 'dokku plugins-install' ?"
         exit 1
     fi
+    ID=$(docker ps | grep "$DB_IMAGE":latest |  awk '{print $1}')
+    if [[ ! -z "$ID" ]]; then
+        echo "DB $DB_IMAGE is already created and running"
+        exit 0
+    fi
     # Check if an existing DB volume exists
     if [[ -f "$DOKKU_ROO/.mysql/volume_$APP" ]]; then
         VOLUME="`cat $DOKKU_ROOT/.mysql/volume_$APP`:/opt/mysql"
@@ -50,9 +55,6 @@ case "$1" in
     fi
     # Fork DB image
     ID=$(docker run -d hughfletcher/mysql exit 0)
-    if [[ -z "$ID" ]]; then
-        docker stop $ID > /dev/null
-    fi
     docker wait $ID > /dev/null
     IMAGE=$(docker commit $ID)
     docker tag $IMAGE $DB_IMAGE
