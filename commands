@@ -38,7 +38,7 @@ case "$1" in
         exit 0
     fi
     # Check if an existing DB volume exists
-    if [[ -f "$DOKKU_ROO/.mysql/volume_$APP" ]]; then
+    if [[ -f "$DOKKU_ROOT/.mysql/volume_$APP" ]]; then
         VOLUME="`cat $DOKKU_ROOT/.mysql/volume_$APP`:/opt/mysql"
         echo
         echo "-----> Reusing mysql/$APP database"
