@@ -59,6 +59,13 @@ Deploy your app with the same name (client side):
     remote: =====> Application deployed:
     remote:        http://foo.server
 
+
+Link your app to the database
+```bash
+dokku mysql:link app_name database_name
+```
+
+
 ##Advanced usage
 
 Deleting databases:
