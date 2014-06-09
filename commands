@@ -148,7 +148,7 @@ case "$1" in
             echo "Database is not initialized correctly"
             exit 1
         fi
-        DB_PASSWORD=$(cat "$DOKKU_ROOT/.mysql/pwd_$APP")
+        DB_PASSWORD=$(cat "$DOKKU_ROOT/.mysql/pwd_$3")
         ID=$(docker ps | grep "$DB_IMAGE":latest |  awk '{print $1}')
         IP=$(docker inspect $ID | grep IPAddress | awk '{ print $2 }' | tr -d ',"')
         # Write database connection vars to app's ENV file
